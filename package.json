@@ -1,0 +1,23 @@
+{
+  "name": "sitemap-shots",
+  "version": "0.1.0",
+  "description": "CLI for crawling sitemap URLs and capturing desktop and mobile screenshots.",
+  "bin": {
+    "sitemap-shots": "dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/cli.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "fast-xml-parser": "^4.5.3",
+    "playwright": "^1.53.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.8.3"
+  }
+}
