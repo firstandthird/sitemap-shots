@@ -11,7 +11,7 @@ Options:
   --sitemap <value>  Sitemap URL or local XML file path
   --url <value>      Single page URL to capture
   --crawl <value>    Crawl internal links starting from a page URL
-  --output <path>    Base output directory
+  --output <path>    Base output directory. Defaults to ./results
   --depth <n>        Maximum crawl depth. 0 = seed page only. Defaults to 2 for --crawl
   --max <n>          Maximum number of pages to capture
   --markdown [mode]  Generate markdown too. Modes: true, false, only. Bare --markdown = true
@@ -21,7 +21,7 @@ Options:
 
 export function parseCliArgs(argv: string[]): CliOptions {
   const options: CliOptions = {
-    output: path.resolve(process.cwd(), "screenshots"),
+    output: path.resolve(process.cwd(), "results"),
     markdown: "false",
     meta: "md",
     metaExplicit: false,

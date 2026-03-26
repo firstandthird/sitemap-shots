@@ -65,3 +65,5 @@ The CLI prints the resolved URLs before prompting for confirmation. Screenshots 
 If the date folder already exists for that domain, the CLI creates `<YYYY-MM-DD>-1`, then `-2`, and so on. The root path `/` is saved as `homepage-desktop.jpg` and `homepage-mobile.jpg`.
 
 For `--crawl`, the seed URL is depth `0`, its direct internal links are depth `1`, and the crawl stays on the same hostname only.
+
+If `--output` is omitted, the CLI writes into `./results`.
