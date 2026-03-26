@@ -5,43 +5,81 @@ import { Readability } from "@mozilla/readability";
 import { JSDOM } from "jsdom";
 import TurndownService from "turndown";
 
-import type { MarkdownFailure, MarkdownSummary, ScreenshotTarget } from "./types";
+import type { ContentExportSummary, MetaMode, ScreenshotTarget } from "./types";
 
 const HTML_CONTENT_TYPES = ["text/html", "application/xhtml+xml"];
 
-export async function exportMarkdown(targets: ScreenshotTarget[]): Promise<MarkdownSummary> {
+type PageMetadata = {
+  title: string;
+  meta: Array<{
+    name: string;
+    value: string;
+  }>;
+};
+
+type ParsedPage = {
+  metadata: PageMetadata;
+  markdown: string;
+};
+
+export async function exportContent(
+  targets: ScreenshotTarget[],
+  options: {
+    generateMarkdown: boolean;
+    metaMode: MetaMode;
+    embedMetaFrontmatter: boolean;
+  },
+): Promise<ContentExportSummary> {
   await ensureDirectories(targets);
 
   const turndown = new TurndownService({
     codeBlockStyle: "fenced",
     headingStyle: "atx",
   });
-  const failures: MarkdownFailure[] = [];
-  let successes = 0;
+  const markdownFailures: ContentExportSummary["markdownFailures"] = [];
+  const metaJsonFailures: ContentExportSummary["metaJsonFailures"] = [];
+  let markdownSuccesses = 0;
+  let metaJsonSuccesses = 0;
 
   for (const target of targets) {
-    console.log(`Generating markdown for ${target.url.toString()}`);
+    console.log(`Processing content for ${target.url.toString()}`);
 
     try {
-      const markdown = await createMarkdown(target.url.toString(), turndown);
-      await writeFile(target.markdownPath, markdown, "utf8");
-      successes += 1;
+      const parsedPage = await createParsedPage(target.url.toString(), turndown);
+
+      if (options.generateMarkdown) {
+        const markdown = options.embedMetaFrontmatter
+          ? addYamlFrontmatter(parsedPage.markdown, parsedPage.metadata)
+          : parsedPage.markdown;
+        await writeFile(target.markdownPath, markdown, "utf8");
+        markdownSuccesses += 1;
+      }
+
+      if (options.metaMode === "json") {
+        await writeFile(target.metaJsonPath, `${JSON.stringify(parsedPage.metadata, null, 2)}\n`, "utf8");
+        metaJsonSuccesses += 1;
+      }
     } catch (error) {
-      failures.push({
-        url: target.url.toString(),
-        error: toErrorMessage(error),
-      });
+      const failure = { url: target.url.toString(), error: toErrorMessage(error) };
+      if (options.generateMarkdown) {
+        markdownFailures.push(failure);
+      }
+      if (options.metaMode === "json") {
+        metaJsonFailures.push(failure);
+      }
     }
   }
 
   return {
     totalPages: targets.length,
-    successes,
-    failures,
+    markdownSuccesses,
+    markdownFailures,
+    metaJsonSuccesses,
+    metaJsonFailures,
   };
 }
 
-async function createMarkdown(url: string, turndown: TurndownService): Promise<string> {
+async function createParsedPage(url: string, turndown: TurndownService): Promise<ParsedPage> {
   const response = await fetch(url, {
     headers: {
       "user-agent": "sitemap-shots/0.1.0",
@@ -60,16 +98,17 @@ async function createMarkdown(url: string, turndown: TurndownService): Promise<s
 
   const html = await response.text();
   const dom = new JSDOM(html, { url });
-  const article = new Readability(dom.window.document).parse();
-  const fallbackTitle = dom.window.document.title.trim();
+  const document = dom.window.document;
+  const article = new Readability(document).parse();
+  const pageTitle = document.title.trim();
   const contentHtml = article?.content?.trim() || dom.window.document.body?.innerHTML?.trim();
+  const title = pageTitle || article?.title?.trim();
 
   if (!contentHtml) {
     throw new Error("No readable content found on page.");
   }
 
   let markdown = turndown.turndown(contentHtml).trim();
-  const title = article?.title?.trim() || fallbackTitle;
 
   if (!markdown) {
     throw new Error("Markdown conversion produced no content.");
@@ -79,7 +118,13 @@ async function createMarkdown(url: string, turndown: TurndownService): Promise<s
     markdown = `# ${title}\n\n${markdown}`;
   }
 
-  return `${markdown}\n`;
+  return {
+    metadata: {
+      title: pageTitle || article?.title?.trim() || "",
+      meta: extractMetaTags(document),
+    },
+    markdown: `${markdown}\n`,
+  };
 }
 
 async function ensureDirectories(targets: ScreenshotTarget[]): Promise<void> {
@@ -87,6 +132,7 @@ async function ensureDirectories(targets: ScreenshotTarget[]): Promise<void> {
 
   for (const target of targets) {
     directories.add(path.dirname(target.markdownPath));
+    directories.add(path.dirname(target.metaJsonPath));
   }
 
   await Promise.all(Array.from(directories).map((directory) => mkdir(directory, { recursive: true })));
@@ -98,4 +144,45 @@ function toErrorMessage(error: unknown): string {
   }
 
   return String(error);
+}
+
+function extractMetaTags(document: Document): PageMetadata["meta"] {
+  const entries: PageMetadata["meta"] = [];
+
+  for (const tag of Array.from(document.querySelectorAll("meta"))) {
+    const name =
+      tag.getAttribute("name")?.trim() ||
+      tag.getAttribute("property")?.trim() ||
+      tag.getAttribute("http-equiv")?.trim();
+    const value = tag.getAttribute("content")?.trim();
+
+    if (!name || !value) {
+      continue;
+    }
+
+    entries.push({ name, value });
+  }
+
+  return entries;
+}
+
+function addYamlFrontmatter(markdown: string, metadata: PageMetadata): string {
+  const lines = ["---", `title: ${toYamlString(metadata.title)}`, "meta:"];
+
+  if (metadata.meta.length === 0) {
+    lines.push("  []");
+  } else {
+    for (const entry of metadata.meta) {
+      lines.push(`  - name: ${toYamlString(entry.name)}`);
+      lines.push(`    value: ${toYamlString(entry.value)}`);
+    }
+  }
+
+  lines.push("---", "");
+
+  return `${lines.join("\n")}${markdown}`;
+}
+
+function toYamlString(value: string): string {
+  return JSON.stringify(value);
 }

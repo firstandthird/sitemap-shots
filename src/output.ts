@@ -26,6 +26,7 @@ export function buildScreenshotTargets(urls: string[], outputRoot: string): Scre
       desktopPath: path.join(targetDir, `${fileSlug}-desktop.jpg`),
       mobilePath: path.join(targetDir, `${fileSlug}-mobile.jpg`),
       markdownPath: path.join(targetDir, `${fileSlug}.md`),
+      metaJsonPath: path.join(targetDir, `${fileSlug}.meta.json`),
     };
   });
 }

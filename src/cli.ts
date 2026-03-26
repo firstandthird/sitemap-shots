@@ -6,10 +6,10 @@ import { stdin as input, stdout as output } from "node:process";
 import { parseCliArgs, getHelpText } from "./args";
 import { captureScreenshots } from "./capture";
 import { resolveUrlsFromCrawl } from "./crawler";
-import { exportMarkdown } from "./markdown";
+import { exportContent } from "./markdown";
 import { buildOutputPreview, buildScreenshotTargets } from "./output";
 import { resolveUrlsFromInput } from "./sitemap";
-import type { MarkdownSummary } from "./types";
+import type { ContentExportSummary, MetaMode } from "./types";
 
 async function main(): Promise<void> {
   try {
@@ -39,9 +39,13 @@ async function main(): Promise<void> {
       return;
     }
 
-    const markdownSummary = shouldGenerateMarkdown(options.markdown)
-      ? await exportMarkdown(targets)
-      : emptyMarkdownSummary(targets.length);
+    const contentSummary = shouldProcessContent(options.markdown, options.meta)
+      ? await exportContent(targets, {
+          generateMarkdown: shouldGenerateMarkdown(options.markdown),
+          metaMode: options.meta,
+          embedMetaFrontmatter: shouldEmbedMetaFrontmatter(options.markdown, options.meta),
+        })
+      : emptyContentSummary(targets.length);
     const captureSummary = shouldCaptureScreenshots(options.markdown)
       ? await captureScreenshots(targets)
       : null;
@@ -51,7 +55,10 @@ async function main(): Promise<void> {
       console.log(`Captured ${captureSummary.successes} of ${captureSummary.totalPages} page(s).`);
     }
     if (shouldGenerateMarkdown(options.markdown)) {
-      console.log(`Generated markdown for ${markdownSummary.successes} of ${markdownSummary.totalPages} page(s).`);
+      console.log(`Generated markdown for ${contentSummary.markdownSuccesses} of ${contentSummary.totalPages} page(s).`);
+    }
+    if (options.meta === "json") {
+      console.log(`Generated metadata JSON for ${contentSummary.metaJsonSuccesses} of ${contentSummary.totalPages} page(s).`);
     }
 
     if (captureSummary?.failures.length) {
@@ -63,9 +70,18 @@ async function main(): Promise<void> {
       process.exitCode = 1;
     }
 
-    if (markdownSummary.failures.length > 0) {
+    if (contentSummary.markdownFailures.length > 0) {
       console.log("Markdown failures:");
-      for (const failure of markdownSummary.failures) {
+      for (const failure of contentSummary.markdownFailures) {
+        console.log(`- ${failure.url}`);
+        console.log(`  ${failure.error}`);
+      }
+      process.exitCode = 1;
+    }
+
+    if (contentSummary.metaJsonFailures.length > 0) {
+      console.log("Metadata JSON failures:");
+      for (const failure of contentSummary.metaJsonFailures) {
         console.log(`- ${failure.url}`);
         console.log(`  ${failure.error}`);
       }
@@ -135,11 +151,21 @@ function shouldCaptureScreenshots(markdownMode: "false" | "true" | "only"): bool
   return markdownMode !== "only";
 }
 
-function emptyMarkdownSummary(totalPages: number): MarkdownSummary {
+function shouldProcessContent(markdownMode: "false" | "true" | "only", metaMode: MetaMode): boolean {
+  return shouldGenerateMarkdown(markdownMode) || metaMode === "json";
+}
+
+function shouldEmbedMetaFrontmatter(markdownMode: "false" | "true" | "only", metaMode: MetaMode): boolean {
+  return shouldGenerateMarkdown(markdownMode) && metaMode === "md";
+}
+
+function emptyContentSummary(totalPages: number): ContentExportSummary {
   return {
     totalPages,
-    successes: 0,
-    failures: [],
+    markdownSuccesses: 0,
+    markdownFailures: [],
+    metaJsonSuccesses: 0,
+    metaJsonFailures: [],
   };
 }
 

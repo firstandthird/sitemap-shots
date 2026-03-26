@@ -1,11 +1,11 @@
 import path from "node:path";
 
-import type { CliOptions, MarkdownMode } from "./types";
+import type { CliOptions, MarkdownMode, MetaMode } from "./types";
 
 const HELP_TEXT = `Usage:
-  sitemap-shots --sitemap <xml-url-or-file> --output <path> [--max <n>] [--markdown[=<mode>]] [--yes]
-  sitemap-shots --url <page-url> --output <path> [--markdown[=<mode>]] [--yes]
-  sitemap-shots --crawl <page-url> --output <path> [--depth <n>] [--max <n>] [--markdown[=<mode>]] [--yes]
+  sitemap-shots --sitemap <xml-url-or-file> --output <path> [--max <n>] [--markdown[=<mode>]] [--meta <mode>] [--yes]
+  sitemap-shots --url <page-url> --output <path> [--markdown[=<mode>]] [--meta <mode>] [--yes]
+  sitemap-shots --crawl <page-url> --output <path> [--depth <n>] [--max <n>] [--markdown[=<mode>]] [--meta <mode>] [--yes]
 
 Options:
   --sitemap <value>  Sitemap URL or local XML file path
@@ -15,6 +15,7 @@ Options:
   --depth <n>        Maximum crawl depth. 0 = seed page only. Defaults to 2 for --crawl
   --max <n>          Maximum number of pages to capture
   --markdown [mode]  Generate markdown too. Modes: true, false, only. Bare --markdown = true
+  --meta <mode>      Metadata export mode. Modes: md, json, false. Defaults to md
   --yes              Skip the confirmation prompt and start immediately
   --help             Show this help text`;
 
@@ -22,6 +23,8 @@ export function parseCliArgs(argv: string[]): CliOptions {
   const options: CliOptions = {
     output: path.resolve(process.cwd(), "screenshots"),
     markdown: "false",
+    meta: "md",
+    metaExplicit: false,
   };
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -50,6 +53,23 @@ export function parseCliArgs(argv: string[]): CliOptions {
 
     if (arg.startsWith("--markdown=")) {
       options.markdown = parseMarkdownMode(arg.slice("--markdown=".length));
+      continue;
+    }
+
+    if (arg === "--meta") {
+      const next = argv[index + 1];
+      if (!next || next.startsWith("--")) {
+        throw new Error("Missing value for --meta");
+      }
+      options.meta = parseMetaMode(next);
+      options.metaExplicit = true;
+      index += 1;
+      continue;
+    }
+
+    if (arg.startsWith("--meta=")) {
+      options.meta = parseMetaMode(arg.slice("--meta=".length));
+      options.metaExplicit = true;
       continue;
     }
 
@@ -136,6 +156,10 @@ function validateOptions(options: CliOptions): void {
   if (typeof options.depth === "number" && !options.crawl) {
     throw new Error("--depth can only be used with --crawl.");
   }
+
+  if (options.metaExplicit && options.meta === "md" && options.markdown === "false") {
+    throw new Error("--meta md requires markdown output. Use --markdown, --markdown true, or --markdown only.");
+  }
 }
 
 function parseMarkdownMode(value: string): MarkdownMode {
@@ -146,4 +170,14 @@ function parseMarkdownMode(value: string): MarkdownMode {
   }
 
   throw new Error(`--markdown must be true, false, or only. Received: ${value}`);
+}
+
+function parseMetaMode(value: string): MetaMode {
+  const normalized = value.toLowerCase();
+
+  if (normalized === "md" || normalized === "json" || normalized === "false") {
+    return normalized;
+  }
+
+  throw new Error(`--meta must be md, json, or false. Received: ${value}`);
 }

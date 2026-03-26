@@ -1,4 +1,5 @@
 export type MarkdownMode = "false" | "true" | "only";
+export type MetaMode = "md" | "json" | "false";
 
 export type CliOptions = {
   sitemap?: string;
@@ -8,6 +9,8 @@ export type CliOptions = {
   max?: number;
   depth?: number;
   markdown: MarkdownMode;
+  meta: MetaMode;
+  metaExplicit: boolean;
   yes?: boolean;
   help?: boolean;
 };
@@ -20,6 +23,7 @@ export type ScreenshotTarget = {
   desktopPath: string;
   mobilePath: string;
   markdownPath: string;
+  metaJsonPath: string;
 };
 
 export type CaptureFailure = {
@@ -33,15 +37,17 @@ export type CaptureSummary = {
   failures: CaptureFailure[];
 };
 
-export type MarkdownFailure = {
+export type ContentFailure = {
   url: string;
   error: string;
 };
 
-export type MarkdownSummary = {
+export type ContentExportSummary = {
   totalPages: number;
-  successes: number;
-  failures: MarkdownFailure[];
+  markdownSuccesses: number;
+  markdownFailures: ContentFailure[];
+  metaJsonSuccesses: number;
+  metaJsonFailures: ContentFailure[];
 };
 
 export type SitemapReference =

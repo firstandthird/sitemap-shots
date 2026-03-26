@@ -1,6 +1,6 @@
 # sitemap-shots
 
-CLI for resolving URLs from a sitemap XML and capturing full-page desktop and mobile screenshots with Playwright, with optional Markdown export.
+CLI for resolving URLs from a sitemap XML and capturing full-page desktop and mobile screenshots with Playwright, with optional Markdown and metadata export.
 
 ## Usage
 
@@ -35,6 +35,18 @@ Generate Markdown only:
 node dist/cli.js --crawl https://example.com/ --depth 1 --output ./shots --markdown only
 ```
 
+Write metadata into Markdown frontmatter:
+
+```bash
+node dist/cli.js --url https://example.com/ --output ./shots --markdown --meta md
+```
+
+Write metadata to a sidecar JSON file:
+
+```bash
+node dist/cli.js --url https://example.com/ --output ./shots --markdown false --meta json
+```
+
 Skip the confirmation prompt with `--yes`:
 
 ```bash
@@ -47,6 +59,7 @@ The CLI prints the resolved URLs before prompting for confirmation. Screenshots 
 <output>/<domain>/<YYYY-MM-DD>/<slug>-desktop.jpg
 <output>/<domain>/<YYYY-MM-DD>/<slug>-mobile.jpg
 <output>/<domain>/<YYYY-MM-DD>/<slug>.md
+<output>/<domain>/<YYYY-MM-DD>/<slug>.meta.json
 ```
 
 If the date folder already exists for that domain, the CLI creates `<YYYY-MM-DD>-1`, then `-2`, and so on. The root path `/` is saved as `homepage-desktop.jpg` and `homepage-mobile.jpg`.
