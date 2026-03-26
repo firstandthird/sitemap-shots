@@ -5,11 +5,12 @@ import { stdin as input, stdout as output } from "node:process";
 
 import { parseCliArgs, getHelpText } from "./args";
 import { captureScreenshots } from "./capture";
-import { resolveUrlsFromCrawl } from "./crawler";
+import { crawlSiteGraph } from "./crawler";
+import { buildGraphReport, writeGraphArtifacts } from "./graph";
 import { exportContent } from "./markdown";
 import { buildOutputPreview, buildScreenshotTargets } from "./output";
 import { resolveUrlsFromInput } from "./sitemap";
-import type { ContentExportSummary, MetaMode } from "./types";
+import type { ContentExportSummary, CrawlGraphResult, GraphReport, MetaMode } from "./types";
 
 async function main(): Promise<void> {
   try {
@@ -20,7 +21,8 @@ async function main(): Promise<void> {
       return;
     }
 
-    const urls = await resolveInputUrls(options.sitemap, options.url, options.crawl, options.max, options.depth);
+    const resolution = await resolveInput(options);
+    const urls = resolution.urls;
     if (urls.length === 0) {
       throw new Error("No URLs found to capture.");
     }
@@ -39,6 +41,11 @@ async function main(): Promise<void> {
       return;
     }
 
+    if (resolution.graphReport) {
+      await writeGraphArtifacts(targets, resolution.graphReport);
+      console.log("Generated site graph files.");
+    }
+
     const contentSummary = shouldProcessContent(options.markdown, options.meta)
       ? await exportContent(targets, {
           generateMarkdown: shouldGenerateMarkdown(options.markdown),
@@ -46,7 +53,7 @@ async function main(): Promise<void> {
           embedMetaFrontmatter: shouldEmbedMetaFrontmatter(options.markdown, options.meta),
         })
       : emptyContentSummary(targets.length);
-    const captureSummary = shouldCaptureScreenshots(options.markdown)
+    const captureSummary = shouldCaptureScreenshots(options.shots)
       ? await captureScreenshots(targets)
       : null;
 
@@ -59,6 +66,12 @@ async function main(): Promise<void> {
     }
     if (options.meta === "json") {
       console.log(`Generated metadata JSON for ${contentSummary.metaJsonSuccesses} of ${contentSummary.totalPages} page(s).`);
+    }
+    if (resolution.graphReport) {
+      console.log(`Generated site graph for ${resolution.graphReport.totalReachablePages} reachable page(s).`);
+      if (typeof resolution.graphReport.totalOrphanedPages === "number") {
+        console.log(`Detected ${resolution.graphReport.totalOrphanedPages} orphaned sitemap page(s).`);
+      }
     }
 
     if (captureSummary?.failures.length) {
@@ -95,26 +108,78 @@ async function main(): Promise<void> {
   }
 }
 
-async function resolveInputUrls(
-  sitemap: string | undefined,
-  url: string | undefined,
-  crawl: string | undefined,
-  max?: number,
-  depth?: number,
-): Promise<string[]> {
-  if (url) {
-    return [new URL(url).toString()];
+async function resolveInput(
+  options: {
+    sitemap?: string;
+    url?: string;
+    crawl?: string;
+    max?: number;
+    depth?: number;
+  },
+): Promise<{ urls: string[]; graphReport: GraphReport | null }> {
+  if (options.url) {
+    return {
+      urls: [new URL(options.url).toString()],
+      graphReport: null,
+    };
   }
 
-  if (crawl) {
-    return resolveUrlsFromCrawl(crawl, max, depth ?? 2);
+  if (options.crawl) {
+    const depthLimit = options.depth ?? 4;
+    const crawlResult = await crawlSiteGraph(options.crawl, options.max, depthLimit);
+    const graphReport = await buildCrawlGraphReport(crawlResult, options.sitemap, depthLimit, options.max);
+
+    return {
+      urls: crawlResult.discoveredUrls,
+      graphReport,
+    };
   }
 
-  if (!sitemap) {
+  if (!options.sitemap) {
     throw new Error("Provide one of --sitemap, --url, or --crawl.");
   }
 
-  return resolveUrlsFromInput(sitemap, max);
+  return {
+    urls: await resolveUrlsFromInput(options.sitemap, options.max),
+    graphReport: null,
+  };
+}
+
+async function buildCrawlGraphReport(
+  crawlResult: CrawlGraphResult,
+  sitemapInput?: string,
+  depthLimit = 4,
+  max?: number,
+): Promise<GraphReport> {
+  let sitemapUrls: string[] | undefined;
+  let sitemapSource: "explicit" | "auto" | "none" = "none";
+  let sitemapReference: string | undefined;
+
+  if (sitemapInput) {
+    sitemapUrls = await resolveUrlsFromInput(sitemapInput);
+    sitemapSource = "explicit";
+    sitemapReference = sitemapInput;
+  } else {
+    const autoSitemapUrl = tryBuildAutoSitemapUrl(crawlResult.seedUrl);
+    if (autoSitemapUrl) {
+      try {
+        sitemapUrls = await resolveUrlsFromInput(autoSitemapUrl);
+        sitemapSource = "auto";
+        sitemapReference = autoSitemapUrl;
+      } catch (error) {
+        console.warn(`Info: unable to use auto sitemap ${autoSitemapUrl}`);
+        console.warn(`  ${toErrorMessage(error)}`);
+      }
+    }
+  }
+
+  return buildGraphReport(crawlResult, {
+    depthLimit,
+    max,
+    sitemapUrls,
+    sitemapReference,
+    sitemapSource,
+  });
 }
 
 function printUrls(urls: string[]): void {
@@ -143,19 +208,19 @@ function toErrorMessage(error: unknown): string {
   return String(error);
 }
 
-function shouldGenerateMarkdown(markdownMode: "false" | "true" | "only"): boolean {
-  return markdownMode === "true" || markdownMode === "only";
+function shouldGenerateMarkdown(markdownMode: "false" | "true"): boolean {
+  return markdownMode === "true";
 }
 
-function shouldCaptureScreenshots(markdownMode: "false" | "true" | "only"): boolean {
-  return markdownMode !== "only";
+function shouldCaptureScreenshots(shotsMode: "false" | "true"): boolean {
+  return shotsMode === "true";
 }
 
-function shouldProcessContent(markdownMode: "false" | "true" | "only", metaMode: MetaMode): boolean {
+function shouldProcessContent(markdownMode: "false" | "true", metaMode: MetaMode): boolean {
   return shouldGenerateMarkdown(markdownMode) || metaMode === "json";
 }
 
-function shouldEmbedMetaFrontmatter(markdownMode: "false" | "true" | "only", metaMode: MetaMode): boolean {
+function shouldEmbedMetaFrontmatter(markdownMode: "false" | "true", metaMode: MetaMode): boolean {
   return shouldGenerateMarkdown(markdownMode) && metaMode === "md";
 }
 
@@ -167,6 +232,18 @@ function emptyContentSummary(totalPages: number): ContentExportSummary {
     metaJsonSuccesses: 0,
     metaJsonFailures: [],
   };
+}
+
+function tryBuildAutoSitemapUrl(seedUrl: string): string | undefined {
+  try {
+    const url = new URL(seedUrl);
+    url.pathname = "/sitemap.xml";
+    url.search = "";
+    url.hash = "";
+    return url.toString();
+  } catch {
+    return undefined;
+  }
 }
 
 void main();

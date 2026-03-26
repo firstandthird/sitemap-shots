@@ -1,4 +1,4 @@
-import type { CrawlFailure } from "./types";
+import type { CrawlEdge, CrawlFailure, CrawlGraphResult } from "./types";
 
 const HTML_CONTENT_TYPES = ["text/html", "application/xhtml+xml"];
 
@@ -7,14 +7,25 @@ type CrawlQueueItem = {
   depth: number;
 };
 
-export async function resolveUrlsFromCrawl(input: string, max?: number, depthLimit = 2): Promise<string[]> {
+type MutableCrawlNode = {
+  url: string;
+  depth: number;
+  incomingUrls: Set<string>;
+  outgoingUrls: Set<string>;
+  error?: string;
+};
+
+export async function crawlSiteGraph(input: string, max?: number, depthLimit = 4): Promise<CrawlGraphResult> {
   const startUrl = normalizeSeedUrl(input);
   const queue: CrawlQueueItem[] = [{ url: startUrl, depth: 0 }];
   const discoveredUrls: string[] = [];
   const seenUrls = new Set<string>();
   const failures: CrawlFailure[] = [];
+  const nodes = new Map<string, MutableCrawlNode>();
+  const edges = new Set<string>();
 
   seenUrls.add(startUrl.toString());
+  ensureNode(nodes, startUrl.toString(), 0);
 
   while (queue.length > 0) {
     const current = queue.shift();
@@ -22,38 +33,58 @@ export async function resolveUrlsFromCrawl(input: string, max?: number, depthLim
       continue;
     }
 
-    discoveredUrls.push(current.url.toString());
+    const currentUrl = current.url.toString();
+    console.log(
+      `Crawling depth ${current.depth}: ${currentUrl} (${discoveredUrls.length + 1}${typeof max === "number" ? `/${max}` : ""})`,
+    );
+    discoveredUrls.push(currentUrl);
     if (hasReachedMax(discoveredUrls.length, max)) {
+      console.log(`Reached --max limit after ${currentUrl}.`);
       break;
     }
 
     if (current.depth >= depthLimit) {
+      console.log(`Reached depth limit at ${currentUrl}; not following child links.`);
       continue;
     }
 
     try {
       const childUrls = await extractInternalLinks(current.url, startUrl.hostname);
+      console.log(`  Found ${childUrls.length} internal link${childUrls.length === 1 ? "" : "s"} on ${currentUrl}.`);
+      let enqueuedCount = 0;
 
       for (const childUrl of childUrls) {
         const normalized = childUrl.toString();
+        connectNodes(nodes, edges, currentUrl, normalized, current.depth + 1);
+
         if (seenUrls.has(normalized)) {
           continue;
         }
 
         seenUrls.add(normalized);
         queue.push({ url: childUrl, depth: current.depth + 1 });
+        enqueuedCount += 1;
 
         if (hasReachedMax(seenUrls.size, max)) {
+          console.log(`  Reached --max limit while queueing links from ${currentUrl}.`);
           break;
         }
       }
-    } catch (error) {
-      failures.push({
-        url: current.url.toString(),
-        error: toErrorMessage(error),
-      });
-    }
 
+      if (enqueuedCount > 0) {
+        console.log(`  Queued ${enqueuedCount} new page${enqueuedCount === 1 ? "" : "s"} from ${currentUrl}.`);
+      } else {
+        console.log(`  No new pages queued from ${currentUrl}.`);
+      }
+    } catch (error) {
+      const message = toErrorMessage(error);
+      failures.push({
+        url: currentUrl,
+        error: message,
+      });
+      ensureNode(nodes, currentUrl, current.depth).error = message;
+      console.warn(`  Crawl failed for ${currentUrl}: ${message}`);
+    }
   }
 
   for (const failure of failures) {
@@ -61,7 +92,28 @@ export async function resolveUrlsFromCrawl(input: string, max?: number, depthLim
     console.warn(`  ${failure.error}`);
   }
 
-  return discoveredUrls;
+  return {
+    seedUrl: startUrl.toString(),
+    discoveredUrls,
+    nodes: Array.from(nodes.values())
+      .map((node) => ({
+        url: node.url,
+        depth: node.depth,
+        incomingCount: node.incomingUrls.size,
+        outgoingUrls: Array.from(node.outgoingUrls).sort(),
+        error: node.error,
+      }))
+      .sort((left, right) => left.depth - right.depth || left.url.localeCompare(right.url)),
+    edges: Array.from(edges)
+      .map((key) => parseEdgeKey(key))
+      .sort((left, right) => left.from.localeCompare(right.from) || left.to.localeCompare(right.to)),
+    failures,
+  };
+}
+
+export async function resolveUrlsFromCrawl(input: string, max?: number, depthLimit = 4): Promise<string[]> {
+  const result = await crawlSiteGraph(input, max, depthLimit);
+  return result.discoveredUrls;
 }
 
 async function extractInternalLinks(pageUrl: URL, hostname: string): Promise<URL[]> {
@@ -167,6 +219,49 @@ function decodeHtmlEntities(value: string): string {
 
 function hasReachedMax(count: number, max?: number): boolean {
   return typeof max === "number" && count >= max;
+}
+
+function ensureNode(nodes: Map<string, MutableCrawlNode>, url: string, depth: number): MutableCrawlNode {
+  const existing = nodes.get(url);
+  if (existing) {
+    if (depth < existing.depth) {
+      existing.depth = depth;
+    }
+    return existing;
+  }
+
+  const created: MutableCrawlNode = {
+    url,
+    depth,
+    incomingUrls: new Set<string>(),
+    outgoingUrls: new Set<string>(),
+  };
+  nodes.set(url, created);
+  return created;
+}
+
+function connectNodes(
+  nodes: Map<string, MutableCrawlNode>,
+  edges: Set<string>,
+  fromUrl: string,
+  toUrl: string,
+  childDepth: number,
+): void {
+  const fromNode = ensureNode(nodes, fromUrl, childDepth - 1);
+  const toNode = ensureNode(nodes, toUrl, childDepth);
+
+  fromNode.outgoingUrls.add(toUrl);
+  toNode.incomingUrls.add(fromUrl);
+  edges.add(buildEdgeKey(fromUrl, toUrl));
+}
+
+function buildEdgeKey(fromUrl: string, toUrl: string): string {
+  return `${fromUrl}\u0000${toUrl}`;
+}
+
+function parseEdgeKey(value: string): CrawlEdge {
+  const [from, to] = value.split("\u0000");
+  return { from, to };
 }
 
 function toErrorMessage(error: unknown): string {
