@@ -1,8 +1,10 @@
 export type CliOptions = {
   sitemap?: string;
   url?: string;
+  crawl?: string;
   output: string;
   max?: number;
+  depth?: number;
   yes?: boolean;
   help?: boolean;
 };
@@ -36,3 +38,8 @@ export type SitemapReference =
       kind: "file";
       value: string;
     };
+
+export type CrawlFailure = {
+  url: string;
+  error: string;
+};

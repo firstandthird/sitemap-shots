@@ -5,6 +5,7 @@ import { stdin as input, stdout as output } from "node:process";
 
 import { parseCliArgs, getHelpText } from "./args";
 import { captureScreenshots } from "./capture";
+import { resolveUrlsFromCrawl } from "./crawler";
 import { buildOutputPreview, buildScreenshotTargets } from "./output";
 import { resolveUrlsFromInput } from "./sitemap";
 
@@ -17,7 +18,7 @@ async function main(): Promise<void> {
       return;
     }
 
-    const urls = await resolveInputUrls(options.sitemap, options.url, options.max);
+    const urls = await resolveInputUrls(options.sitemap, options.url, options.crawl, options.max, options.depth);
     if (urls.length === 0) {
       throw new Error("No URLs found to capture.");
     }
@@ -57,13 +58,23 @@ async function main(): Promise<void> {
   }
 }
 
-async function resolveInputUrls(sitemap: string | undefined, url: string | undefined, max?: number): Promise<string[]> {
+async function resolveInputUrls(
+  sitemap: string | undefined,
+  url: string | undefined,
+  crawl: string | undefined,
+  max?: number,
+  depth?: number,
+): Promise<string[]> {
   if (url) {
     return [new URL(url).toString()];
   }
 
+  if (crawl) {
+    return resolveUrlsFromCrawl(crawl, max, depth ?? 2);
+  }
+
   if (!sitemap) {
-    throw new Error("Provide one of --sitemap or --url.");
+    throw new Error("Provide one of --sitemap, --url, or --crawl.");
   }
 
   return resolveUrlsFromInput(sitemap, max);
