@@ -1,11 +1,11 @@
 import path from "node:path";
 
-import type { CliOptions } from "./types";
+import type { CliOptions, MarkdownMode } from "./types";
 
 const HELP_TEXT = `Usage:
-  sitemap-shots --sitemap <xml-url-or-file> --output <path> [--max <n>] [--yes]
-  sitemap-shots --url <page-url> --output <path> [--yes]
-  sitemap-shots --crawl <page-url> --output <path> [--depth <n>] [--max <n>] [--yes]
+  sitemap-shots --sitemap <xml-url-or-file> --output <path> [--max <n>] [--markdown[=<mode>]] [--yes]
+  sitemap-shots --url <page-url> --output <path> [--markdown[=<mode>]] [--yes]
+  sitemap-shots --crawl <page-url> --output <path> [--depth <n>] [--max <n>] [--markdown[=<mode>]] [--yes]
 
 Options:
   --sitemap <value>  Sitemap URL or local XML file path
@@ -14,12 +14,14 @@ Options:
   --output <path>    Base output directory
   --depth <n>        Maximum crawl depth. 0 = seed page only. Defaults to 2 for --crawl
   --max <n>          Maximum number of pages to capture
+  --markdown [mode]  Generate markdown too. Modes: true, false, only. Bare --markdown = true
   --yes              Skip the confirmation prompt and start immediately
   --help             Show this help text`;
 
 export function parseCliArgs(argv: string[]): CliOptions {
   const options: CliOptions = {
     output: path.resolve(process.cwd(), "screenshots"),
+    markdown: "false",
   };
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -32,6 +34,22 @@ export function parseCliArgs(argv: string[]): CliOptions {
 
     if (arg === "--yes") {
       options.yes = true;
+      continue;
+    }
+
+    if (arg === "--markdown") {
+      const next = argv[index + 1];
+      if (!next || next.startsWith("--")) {
+        options.markdown = "true";
+      } else {
+        options.markdown = parseMarkdownMode(next);
+        index += 1;
+      }
+      continue;
+    }
+
+    if (arg.startsWith("--markdown=")) {
+      options.markdown = parseMarkdownMode(arg.slice("--markdown=".length));
       continue;
     }
 
@@ -118,4 +136,14 @@ function validateOptions(options: CliOptions): void {
   if (typeof options.depth === "number" && !options.crawl) {
     throw new Error("--depth can only be used with --crawl.");
   }
+}
+
+function parseMarkdownMode(value: string): MarkdownMode {
+  const normalized = value.toLowerCase();
+
+  if (normalized === "true" || normalized === "false" || normalized === "only") {
+    return normalized;
+  }
+
+  throw new Error(`--markdown must be true, false, or only. Received: ${value}`);
 }

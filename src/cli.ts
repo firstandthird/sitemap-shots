@@ -6,8 +6,10 @@ import { stdin as input, stdout as output } from "node:process";
 import { parseCliArgs, getHelpText } from "./args";
 import { captureScreenshots } from "./capture";
 import { resolveUrlsFromCrawl } from "./crawler";
+import { exportMarkdown } from "./markdown";
 import { buildOutputPreview, buildScreenshotTargets } from "./output";
 import { resolveUrlsFromInput } from "./sitemap";
+import type { MarkdownSummary } from "./types";
 
 async function main(): Promise<void> {
   try {
@@ -37,14 +39,33 @@ async function main(): Promise<void> {
       return;
     }
 
-    const summary = await captureScreenshots(targets);
+    const markdownSummary = shouldGenerateMarkdown(options.markdown)
+      ? await exportMarkdown(targets)
+      : emptyMarkdownSummary(targets.length);
+    const captureSummary = shouldCaptureScreenshots(options.markdown)
+      ? await captureScreenshots(targets)
+      : null;
 
     console.log("");
-    console.log(`Captured ${summary.successes} of ${summary.totalPages} page(s).`);
+    if (captureSummary) {
+      console.log(`Captured ${captureSummary.successes} of ${captureSummary.totalPages} page(s).`);
+    }
+    if (shouldGenerateMarkdown(options.markdown)) {
+      console.log(`Generated markdown for ${markdownSummary.successes} of ${markdownSummary.totalPages} page(s).`);
+    }
 
-    if (summary.failures.length > 0) {
-      console.log("Failures:");
-      for (const failure of summary.failures) {
+    if (captureSummary?.failures.length) {
+      console.log("Screenshot failures:");
+      for (const failure of captureSummary.failures) {
+        console.log(`- ${failure.url}`);
+        console.log(`  ${failure.error}`);
+      }
+      process.exitCode = 1;
+    }
+
+    if (markdownSummary.failures.length > 0) {
+      console.log("Markdown failures:");
+      for (const failure of markdownSummary.failures) {
         console.log(`- ${failure.url}`);
         console.log(`  ${failure.error}`);
       }
@@ -91,7 +112,7 @@ async function promptToContinue(): Promise<boolean> {
   const rl = createInterface({ input, output });
 
   try {
-    const answer = await rl.question("Start taking screenshots? [y/N] ");
+    const answer = await rl.question("Start processing pages? [y/N] ");
     return /^(y|yes)$/i.test(answer.trim());
   } finally {
     rl.close();
@@ -104,6 +125,22 @@ function toErrorMessage(error: unknown): string {
   }
 
   return String(error);
+}
+
+function shouldGenerateMarkdown(markdownMode: "false" | "true" | "only"): boolean {
+  return markdownMode === "true" || markdownMode === "only";
+}
+
+function shouldCaptureScreenshots(markdownMode: "false" | "true" | "only"): boolean {
+  return markdownMode !== "only";
+}
+
+function emptyMarkdownSummary(totalPages: number): MarkdownSummary {
+  return {
+    totalPages,
+    successes: 0,
+    failures: [],
+  };
 }
 
 void main();

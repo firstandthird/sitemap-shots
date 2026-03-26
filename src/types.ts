@@ -1,3 +1,5 @@
+export type MarkdownMode = "false" | "true" | "only";
+
 export type CliOptions = {
   sitemap?: string;
   url?: string;
@@ -5,6 +7,7 @@ export type CliOptions = {
   output: string;
   max?: number;
   depth?: number;
+  markdown: MarkdownMode;
   yes?: boolean;
   help?: boolean;
 };
@@ -16,6 +19,7 @@ export type ScreenshotTarget = {
   slug: string;
   desktopPath: string;
   mobilePath: string;
+  markdownPath: string;
 };
 
 export type CaptureFailure = {
@@ -27,6 +31,17 @@ export type CaptureSummary = {
   totalPages: number;
   successes: number;
   failures: CaptureFailure[];
+};
+
+export type MarkdownFailure = {
+  url: string;
+  error: string;
+};
+
+export type MarkdownSummary = {
+  totalPages: number;
+  successes: number;
+  failures: MarkdownFailure[];
 };
 
 export type SitemapReference =
